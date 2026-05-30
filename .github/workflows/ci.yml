@@ -11,6 +11,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# GitHub forces JS actions onto Node 24 from 2026-06-16; opt in now so the
+# docker/* actions stop emitting the Node 20 deprecation warning.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Single-arch (arm64) build. The only consumer is an ARM64 SBC; amd64 is
   # added back only on evidence of an amd64 consumer. Builds on every PR to
