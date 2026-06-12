@@ -74,6 +74,20 @@ Find channel IDs at [Kolibri Content Library](https://kolibri-catalog-en.learnin
 2. Push to `main` — CI builds and pushes the new image
 3. Pull on the server: `docker compose pull kolibri && docker compose up -d kolibri`
 
+## Running as non-root
+
+The image runs as a non-root user (`kolibri`, uid 999), and the base image is
+pinned by digest. `KOLIBRI_HOME` (`/data`) is owned by `kolibri` in the image,
+so a **named volume** (`-v kolibri_data:/data`, as shown above) inherits that
+ownership automatically — no extra setup.
+
+If you **bind-mount a host directory** instead (`-v /srv/kolibri:/data`), Docker
+keeps the host's ownership and Kolibri won't be able to write. Chown it first:
+
+```bash
+sudo chown -R 999:999 /srv/kolibri
+```
+
 ## License
 
 [MIT](license.md)
