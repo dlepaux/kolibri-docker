@@ -13,15 +13,21 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir kolibri==${KOLIBRI_VERSION}
 
-ENV KOLIBRI_HOME=/data \
-    KOLIBRI_LISTEN_PORT=8080
+ARG KOLIBRI_UID=999
+ARG KOLIBRI_GID=999
 
-# Run as a non-root user. KOLIBRI_HOME (/data) is owned by it so the database
-# and downloaded content are writable; a fresh named volume inherits this
-# ownership from the image directory. (Bind mounts keep host ownership — see
-# the readme's non-root note.)
-RUN groupadd --system --gid 999 kolibri \
-    && useradd --system --uid 999 --gid 999 --create-home \
+ENV KOLIBRI_HOME=/data \
+    KOLIBRI_LISTEN_PORT=8080 \
+    KOLIBRI_UID=${KOLIBRI_UID} \
+    KOLIBRI_GID=${KOLIBRI_GID}
+
+# The server runs as this non-root user. The build-time chown below only covers
+# a *fresh* named volume, which inherits ownership from this image directory —
+# it does nothing for a volume that already exists, because the mount hides the
+# image's /data entirely. Pre-existing volumes are reconciled at runtime by
+# entrypoint.sh; see the comment there for the outage that proved it necessary.
+RUN groupadd --system --gid ${KOLIBRI_GID} kolibri \
+    && useradd --system --uid ${KOLIBRI_UID} --gid ${KOLIBRI_GID} --create-home \
         --home-dir /home/kolibri --shell /usr/sbin/nologin kolibri \
     && mkdir -p /data \
     && chown -R kolibri:kolibri /data
@@ -31,7 +37,11 @@ VOLUME /data
 
 COPY --chown=kolibri:kolibri entrypoint.sh /entrypoint.sh
 
-USER kolibri
+# Deliberately no `USER kolibri`: PID 1 needs root to reconcile the ownership of
+# a pre-existing /data volume, then drops to ${KOLIBRI_UID} via setpriv before
+# exec'ing Kolibri. The server process is never root. Requires the default
+# CAP_CHOWN/CAP_SETUID/CAP_SETGID — do not add `cap_drop: [ALL]` without also
+# passing `user: "999:999"`, which skips the reconcile.
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/public/info/')" || exit 1

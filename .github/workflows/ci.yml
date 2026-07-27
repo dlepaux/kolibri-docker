@@ -17,12 +17,88 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Regression test for the 2026-06-12 outage: the image dropped from root to
+  # uid 999 while the deployed volume was still owned by uid 1000, so Kolibri
+  # could not write /data and crash-looped unnoticed for six weeks. This job
+  # recreates that exact volume and asserts the entrypoint reconciles it. It
+  # gates publishing, so a uid change can never reach GHCR unverified again.
+  smoke:
+    name: smoke (pre-existing foreign-uid volume)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image locally
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: kolibri:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Seed a volume owned by the legacy uid (1000)
+        run: |
+          docker volume create kolibri-smoke
+          docker run --rm -v kolibri-smoke:/data busybox:1.37 sh -c '
+            mkdir -p /data/logs &&
+            echo "legacy log line" > /data/logs/kolibri.txt &&
+            chown -R 1000:1000 /data'
+          echo "seeded ownership:"
+          docker run --rm -v kolibri-smoke:/data busybox:1.37 stat -c '%u:%g %n' /data /data/logs/kolibri.txt
+
+      - name: Start Kolibri against that volume
+        run: |
+          docker run -d --name kolibri-smoke \
+            -e KOLIBRI_FACILITY_NAME=smoke \
+            -e KOLIBRI_SUPERUSER_NAME=admin \
+            -e KOLIBRI_SUPERUSER_PASSWORD=smoke-only-not-a-secret \
+            -v kolibri-smoke:/data -p 8080:8080 kolibri:smoke
+
+      - name: Assert it serves (fails on the permission regression)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/api/public/info/; then
+              echo "Kolibri answered after $((i * 5))s"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' kolibri-smoke)" != "true" ]; then
+              echo "::error::container exited during startup"
+              break
+            fi
+            sleep 5
+          done
+          echo "::error::Kolibri never served /api/public/info/ — dumping logs"
+          docker logs kolibri-smoke 2>&1 | tail -50
+          exit 1
+
+      - name: Assert the server dropped privileges
+        run: |
+          # Must read PID 1, not `docker exec id -u`: with no `USER` in the
+          # Dockerfile, exec lands as root regardless of what the server runs as.
+          docker exec kolibri-smoke grep -E '^(Name|Uid):' /proc/1/status
+          uid=$(docker exec kolibri-smoke awk '/^Uid:/{print $2}' /proc/1/status)
+          [ "$uid" = "999" ] || { echo "::error::PID 1 expected uid 999, got $uid"; exit 1; }
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f kolibri-smoke >/dev/null 2>&1 || true
+          docker volume rm kolibri-smoke >/dev/null 2>&1 || true
+
   # Single-arch (arm64) build. The only consumer is an ARM64 SBC; amd64 is
   # added back only on evidence of an amd64 consumer. Builds on every PR to
   # validate the Dockerfile; publishes to GHCR only on a push to main.
   docker:
     name: build + push (linux/arm64)
     runs-on: ubuntu-24.04-arm
+    needs: smoke
     permissions:
       contents: read
       packages: write
