@@ -1,5 +1,5 @@
 # Base pinned by digest (Renovate bumps it). Tag kept for human readability.
-FROM python:3.12-slim-bookworm@sha256:76d4b7b6305788c6b4c6a19d6a22a3921bf802e9af4d5e1e5bd771208dba74bf
+FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 LABEL org.opencontainers.image.source=https://github.com/dlepaux/kolibri-docker
 
 ARG KOLIBRI_VERSION=0.19.4
