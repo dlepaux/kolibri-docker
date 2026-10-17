@@ -24,7 +24,7 @@ jobs:
   # gates publishing, so a uid change can never reach GHCR unverified again.
   smoke:
     name: smoke (pre-existing foreign-uid volume)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -97,7 +97,7 @@ jobs:
   # validate the Dockerfile; publishes to GHCR only on a push to main.
   docker:
     name: build + push (linux/arm64)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: smoke
     permissions:
       contents: read
